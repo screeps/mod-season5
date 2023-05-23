@@ -1,0 +1,124 @@
+const _ = require('lodash');
+
+module.exports = function(config) {
+    if(config.common) {
+        config.common.constants.FIND_REACTORS = 10051;
+        config.common.constants.LOOK_REACTORS = "reactor";
+    }
+
+    if (config.backend) {
+        config.backend.customObjectTypes.reactor = {
+            sidepanel: '<div><label class="body-header">Store:</label>' +
+                    '<div ng-if="!Room.calcResources(Room.selectedObject)"> Empty </div>' +
+                    '<div ng-if="Room.calcResources(Room.selectedObject)">' +
+                        '<table ng-repeat="(resourceType, amount) in Room.selectedObject.store" ng-if="amount > 0">' +
+                            '<td>{{amount | number}}&nbsp;&times;&nbsp;</td>' +
+                            '<td><img class="resource-type" ng-src="https://s3.amazonaws.com/static.screeps.com/upload/mineral-icons/{{resourceType}}.png" uib-tooltip="{{Room.resourceTypeNames[resourceType]}}"></td>' +
+                        '</table>' +
+                    '</div>' +
+                '</div>' +
+                '<div ng-if="object.launchTime">' +
+                    '<label>Continuous work:</label><span>{{Room.gameTime - object.launchTime}}</span>' +
+                '</div>'
+        };
+    }
+
+    if(config.engine) {
+        config.engine.registerCustomObjectPrototype('reactor', 'Reactor', {
+            prototypeExtender (prototype, scope, {utils}) {
+                const data = id => {
+                    if (!scope.runtimeData.roomObjects[id]) {
+                        throw new Error("Could not find an object with ID " + id);
+                    }
+                    return scope.runtimeData.roomObjects[id];
+                };
+
+                utils.defineGameObjectProperties(prototype, data, {
+                    owner: o => o.user ? { username: scope.runtimeData.users[o.user].username } : undefined,
+                    my: o => o.user ? o.user == scope.runtimeData.user._id : undefined,
+                    store: o => new scope.globals.Store(o),
+                    continuousWork: o => Math.max(0, o.launchTime - scope.runtimeData.time)
+                });
+
+                prototype.toString = function() { return `[reactor #${this.id}]` };
+            },
+            findConstant: config.common.constants.FIND_REACTORS,
+            lookConstant: config.common.constants.LOOK_REACTORS
+        });
+
+        config.engine.on('postProcessObject', function (object, roomObjects, roomTerrain, gameTime, roomInfo, bulk, bulkUsers, eventLog, mapView) {
+            if (object.type == 'reactor') {
+                if(!object.store.T && object.launchTime) {
+                    delete object.launchTime;
+                    bulk.update(object, {launchTime: null});
+                    return;
+                }
+
+                if(object.user) {
+                    if(object.store.T) {
+                        if(!object.launchTime) {
+                            object.launchTime = gameTime;
+                            bulk.update(object, {launchTime: object.launchTime});
+                        }
+
+                        bulk.update(object, {store: {T: object.store.T - 1}});
+
+                        const score = 1+Math.floor(Math.log10(1+gameTime-object.launchTime));
+                        bulkUsers.inc(object.user, 'score', score);
+                    }
+                }
+
+                roomInfo.active = true;
+            }
+        });
+    }
+
+    if(config.cronjobs) {
+        config.cronjobs.genReactors = [60, async ({utils}) => {
+            const C = config.common.constants;
+            const {db, env} = config.common.storage;
+
+            // run once
+            if(await env.get('reactorsGenerated')) {
+                return;
+            }
+            console.log(`Generating reactors...`);
+
+            const common = require('@screeps/common');
+
+            const roomObjects = await db['rooms.objects'].find({});
+            const rooms = await db['rooms'].find({_id: {$regex: '5[NS]\\d?5$'}});
+            console.log(`${rooms.length} central rooms`);
+
+            for(const room of rooms) {
+                const reactor = _.find(roomObjects, {type: 'reactor', room: room._id});
+                if(reactor) {
+                    continue;
+                }
+                console.log(`No reactor in room ${room._id}`);
+                const wallObjects = _.filter(roomObjects,
+                    o => o.room == room._id && _.includes(['source', 'mineral', 'controller'], o.type));
+                const roomTerrain = await db['rooms.terrain'].findOne({room: room._id});
+                const terrain = roomTerrain.terrain;
+
+                const freePos = await utils.findFreePos(room._id, 0);
+                if(!freePos) {
+                    console.log(`No free position for reactor in ${room._id}`);
+                    return;
+                }
+
+                await db['rooms.objects'].insert({
+                    room: room._id,
+                    x: freePos.x,
+                    y: freePos.y,
+                    type: 'reactor',
+                    store: {},
+                    storeCapacityResource: {T: 1000}
+                });
+                console.log(`${room._id}: ${freePos.x},${freePos.y}`);
+            }
+
+            await env.set('reactorsGenerated', 1);
+        }];
+    }
+};
