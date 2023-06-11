@@ -21,6 +21,15 @@ module.exports = function(config) {
                     '<label>Continuous work:</label><span>{{Room.gameTime - object.launchTime}}</span>' +
                 '</div>'
         };
+
+        config.backend.on('expressPostConfig', function(app, params) {
+            const utils = params.utils;
+            const previousRespawn = utils.respawnUser;
+            utils.respawnUser = async function(userId) {
+                await config.common.storage.db['rooms.objects'].update({type: 'reactor', user: userId.toString()}, {$unset: {user: 1, launchTime: 1}});
+                return previousRespawn(userId);
+            }
+        });
     }
 
     if(config.engine) {
