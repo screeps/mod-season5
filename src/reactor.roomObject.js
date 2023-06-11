@@ -46,6 +46,15 @@ module.exports = function(config) {
             lookConstant: config.common.constants.LOOK_REACTORS
         });
 
+        config.engine.on('preProcessObjectIntents', function(object, userId, objectIntents, roomObjects, roomTerrain, gameTime, roomInfo, bulk, bulkUsers){
+            if(objectIntents.withdraw && objectIntents.withdraw.id && objectIntents.withdraw.resourceType == config.common.constants.RESOURCE_THORIUM) {
+                const target = roomObjects[objectIntents.withdraw.id];
+                if(target.type == 'reactor') {
+                    objectIntents.withdraw = null;
+                }
+            }
+        });
+
         config.engine.on('postProcessObject', function (object, roomObjects, roomTerrain, gameTime, roomInfo, bulk, bulkUsers, eventLog, mapView) {
             if (object.type == 'reactor') {
                 if(!object.store.T && object.launchTime) {
