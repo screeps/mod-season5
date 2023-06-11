@@ -80,6 +80,7 @@ module.exports = function(config) {
                         }
 
                         bulk.update(object, {store: {T: object.store.T - 1}});
+                        object.store.T--;
 
                         const score = 1+Math.floor(Math.log10(1+gameTime-object.launchTime));
                         bulkUsers.inc(object.user, 'score', score);
