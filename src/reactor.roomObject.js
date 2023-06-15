@@ -46,7 +46,7 @@ module.exports = function(config) {
                     owner: o => o.user ? { username: scope.runtimeData.users[o.user].username } : undefined,
                     my: o => o.user ? o.user == scope.runtimeData.user._id : undefined,
                     store: o => new scope.globals.Store(o),
-                    continuousWork: o => Math.max(0, scope.runtimeData.time - o.launchTime)
+                    continuousWork: o => o.launchTime ? scope.runtimeData.time - o.launchTime : 0
                 });
 
                 prototype.toString = function() { return `[reactor #${this.id}]` };
